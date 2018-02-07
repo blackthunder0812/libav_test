@@ -1,33 +1,41 @@
 #include <iostream>
-//#include <opencv2/opencv.hpp>
+#include <opencv2/opencv.hpp>
 
 #ifdef __cplusplus
 extern "C" {
   #include <libavcodec/avcodec.h>
   #include <libavformat/avformat.h>
-  #include <libavutil/opt.h>
+  #include <libswscale/swscale.h>
 }
 #endif
 
-int main(int argc, char* argv[])
-{
-  (void) argc; (void) argv;
-  std::string uri = "rtsp://sonbn812.ddns.net:8086/ch0_0.h264";
-//  cv::Mat frame;
-//  cv::VideoCapture cap;
-//  if(!cap.open(uri, cv::CAP_FFMPEG)) {
-//    std::cerr << "Cannot open capture device" << std::endl;
-//    return EXIT_FAILURE;
-//  } else {
-//    for (;;) {
-//      if(cap.grab()) {
-//        cap.read(frame);
-//      } else {
-//        std::cerr << "Grab frame failed" << std::endl;
-//      }
-//    }
-//  }
+int decode_packet(SwsContext *swsContext, AVPacket *pPacket, AVCodecContext *pCodecContext, AVFrame *pFrame, AVFrame *pRGBFrame) {
+  int response = avcodec_send_packet(pCodecContext, pPacket);
+  if (response < 0) {
+    std::cerr << "Error while sending a packet to the decoder" << std::endl;
+    return response;
+  }
+  while (response >= 0) {
+    response = avcodec_receive_frame(pCodecContext, pFrame);
+    if (response == AVERROR(EAGAIN) || response == AVERROR_EOF) {
+      break;
+    } else if (response < 0) {
+      std::cerr << "Error while receiving a frame from the decoder" << std::endl;
+      break;
+    }
+    sws_scale(swsContext, pFrame->data, pFrame->linesize, 0, pFrame->height, pRGBFrame->data, pRGBFrame->linesize);
+    cv::Mat cvFrame(pFrame->height, pFrame->width, CV_8UC3, pRGBFrame->data, pFrame->linesize[0]);
+    cv::imshow("Stream", cvFrame);
+    cv::waitKey(10);
+    av_frame_unref(pFrame);
+  }
+  return 0;
+}
 
+int main(int argc, char* argv[]) {
+  (void) argc; (void) argv;
+  cv::namedWindow("Stream");
+  std::string uri = "rtsp://sonbn812.ddns.net:8086/ch0_0.h264";
   av_register_all();
   avcodec_register_all();
   avformat_network_init();
@@ -58,17 +66,72 @@ int main(int argc, char* argv[])
             std::cerr << "ERROR could not get the stream info" << std::endl;
             return EXIT_FAILURE;
           } else {
-            std::cout << "Finding codecs ..." << std::endl;
+            std::cout << "Finding suitable codecs for each streams ..." << std::endl;
+            int video_stream_index = 0, audio_stream_index = 1;
+            AVCodecContext *vCodecContext = NULL, *aCodecContext = NULL;
+            SwsContext *swsContext = NULL;
             for (unsigned int i = 0; i < ctx->nb_streams; i++) {
               AVCodec *pCodec = NULL;
               pCodec = avcodec_find_decoder(ctx->streams[i]->codecpar->codec_id);
               if (pCodec == NULL) {
                 std::cerr << "ERROR unsupported codec for stream " << ctx->streams[i]->id << std::endl;
               } else {
-                std::cout << "Codec for stream " << ctx->streams[i]->id << " is " << pCodec->long_name << " type " << pCodec->type << std::endl;
+                std::cout << "Codec for stream " << ctx->streams[i]->id << " is type " << av_get_media_type_string(pCodec->type) << ": " << pCodec->long_name << std::endl;
+                AVCodecContext *pCodecContext = NULL;
+                pCodecContext = avcodec_alloc_context3(pCodec);
+                if (pCodecContext == NULL) {
+                  std::cerr << "Cannot allocate codec context" << std::endl;
+                  return EXIT_FAILURE;
+                } else {
+                  if (avcodec_parameters_to_context(pCodecContext, ctx->streams[i]->codecpar) < 0) {
+                    std::cerr << "Cannot pass parameters to codec" << std::endl;
+                    return EXIT_FAILURE;
+                  } else {
+                    if (avcodec_open2(pCodecContext, pCodec, NULL) < 0) {
+                      std::cerr << "Cannot open codec" << std::endl;
+                      return EXIT_FAILURE;
+                    } else {
+                      if (pCodec->type == AVMEDIA_TYPE_VIDEO) {
+                        vCodecContext = pCodecContext;
+                        video_stream_index = i;
+                        swsContext = sws_getContext(vCodecContext->width, vCodecContext->height, vCodecContext->pix_fmt, vCodecContext->width, vCodecContext->height, AV_PIX_FMT_BGR24, SWS_BICUBIC, NULL, NULL, NULL);
+                      }
+                      if (pCodec->type == AVMEDIA_TYPE_AUDIO) {
+                        aCodecContext = pCodecContext;
+                        audio_stream_index = i;
+                      }
+                    }
+                  }
+                }
               }
             }
-//            AVCodecContext *pCodecContext = avcodec_alloc_context3(pCodec);
+            std::cout << "Processing packets" << std::endl;
+            AVPacket *pPacket = av_packet_alloc();
+            if (!pPacket) {
+              std::cerr << "Failed to allocated memory for AVPacket" << std::endl;
+              return EXIT_FAILURE;
+            }
+            AVFrame *pFrame = av_frame_alloc();
+            if (!pFrame) {
+              std::cerr << "Failed to allocated memory for AVFrame" << std::endl;
+              return EXIT_FAILURE;
+            }
+            AVFrame *pRGBFrame = av_frame_alloc();
+            if (!pRGBFrame) {
+              std::cerr << "Failed to allocated memory for AVFrame" << std::endl;
+              return EXIT_FAILURE;
+            }
+            while (av_read_frame(ctx, pPacket) >= 0) {
+              if (pPacket->stream_index == video_stream_index) {
+//                std::cout << "Processing video packet" << std::endl;
+                decode_packet(swsContext, pPacket, vCodecContext, pFrame, pRGBFrame);
+                av_packet_unref(pPacket);
+              } else if (pPacket->stream_index == audio_stream_index) {
+//                std::cout << "Processing audio packet" << std::endl;
+//                decode_packet(pPacket, aCodecContext, pFrame);
+//                av_packet_unref(pPacket);
+              }
+            }
           }
         }
       }
