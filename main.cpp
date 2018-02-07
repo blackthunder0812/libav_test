@@ -5,6 +5,7 @@
 extern "C" {
   #include <libavcodec/avcodec.h>
   #include <libavformat/avformat.h>
+  #include <libavutil/opt.h>
 }
 #endif
 
@@ -43,23 +44,29 @@ int main(int argc, char* argv[])
       return EXIT_FAILURE;
     } else {
       std::cout << "Opening stream " << uri << std::endl;
-      if (avformat_open_input(&ctx, uri.c_str(), rtsp_input_format, NULL) != 0) {
-        std::cerr << "Error opening stream" << std::endl;
+      AVDictionary *rtsp_options = NULL;
+      if (av_dict_set(&rtsp_options, "rtsp_transport", "tcp", 0) < 0) {
+        std::cerr << "Cannot set rtsp option" << std::endl;
         return EXIT_FAILURE;
       } else {
-        std::cout << "Probing stream ..." << std::endl;
-        if (avformat_find_stream_info(ctx,  NULL) < 0) {
-          std::cerr << "ERROR could not get the stream info" << std::endl;
+        if (avformat_open_input(&ctx, uri.c_str(), rtsp_input_format, &rtsp_options) != 0) {
+          std::cerr << "Error opening stream" << std::endl;
           return EXIT_FAILURE;
         } else {
-          std::cout << "Finding codecs ..." << std::endl;
-          for (unsigned int i = 0; i < ctx->nb_streams; i++) {
-            AVCodec *pCodec = NULL;
-            pCodec = avcodec_find_decoder(ctx->streams[i]->codecpar->codec_id);
-            if (pCodec == NULL) {
-              std::cerr << "ERROR unsupported codec for stream " << ctx->streams[i]->id << std::endl;
-            } else {
-              std::cout << "Codec for stream " << ctx->streams[i]->id << " is " << pCodec->id << std::endl;
+          std::cout << "Probing stream ..." << std::endl;
+          if (avformat_find_stream_info(ctx,  NULL) < 0) {
+            std::cerr << "ERROR could not get the stream info" << std::endl;
+            return EXIT_FAILURE;
+          } else {
+            std::cout << "Finding codecs ..." << std::endl;
+            for (unsigned int i = 0; i < ctx->nb_streams; i++) {
+              AVCodec *pCodec = NULL;
+              pCodec = avcodec_find_decoder(ctx->streams[i]->codecpar->codec_id);
+              if (pCodec == NULL) {
+                std::cerr << "ERROR unsupported codec for stream " << ctx->streams[i]->id << std::endl;
+              } else {
+                std::cout << "Codec for stream " << ctx->streams[i]->id << " is " << pCodec->id << std::endl;
+              }
             }
           }
         }
