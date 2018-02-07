@@ -9,7 +9,7 @@ extern "C" {
 }
 #endif
 
-int decode_packet(SwsContext *swsContext, AVPacket *pPacket, AVCodecContext *pCodecContext, AVFrame *pFrame, AVFrame *pRGBFrame) {
+int decode_packet(SwsContext *swsContext, AVPacket *pPacket, AVCodecContext *pCodecContext, AVFrame *pFrame, cv::Mat &mat, cv::Mat &processedMat) {
   int response = avcodec_send_packet(pCodecContext, pPacket);
   if (response < 0) {
     std::cerr << "Error while sending a packet to the decoder" << std::endl;
@@ -23,10 +23,14 @@ int decode_packet(SwsContext *swsContext, AVPacket *pPacket, AVCodecContext *pCo
       std::cerr << "Error while receiving a frame from the decoder" << std::endl;
       break;
     }
-    sws_scale(swsContext, pFrame->data, pFrame->linesize, 0, pFrame->height, pRGBFrame->data, pRGBFrame->linesize);
-    cv::Mat cvFrame(pFrame->height, pFrame->width, CV_8UC3, pRGBFrame->data, pFrame->linesize[0]);
-    cv::imshow("Stream", cvFrame);
-    cv::waitKey(10);
+    int cvLinesizes[1];
+    cvLinesizes[0] = mat.step1();
+    sws_scale(swsContext, pFrame->data, pFrame->linesize, 0, pFrame->height, &mat.data, cvLinesizes);
+    cv::cvtColor(mat, processedMat, cv::COLOR_BGR2GRAY);
+    cv::GaussianBlur(processedMat, processedMat, cv::Size(7, 7), 1.5, 1.5);
+    cv::Canny(processedMat, processedMat, 0, 30, 3);
+    cv::imshow("Stream", processedMat);
+    cv::waitKey(1);
     av_frame_unref(pFrame);
   }
   return 0;
@@ -70,6 +74,7 @@ int main(int argc, char* argv[]) {
             int video_stream_index = 0, audio_stream_index = 1;
             AVCodecContext *vCodecContext = NULL, *aCodecContext = NULL;
             SwsContext *swsContext = NULL;
+            cv::Mat mat, dstMat;
             for (unsigned int i = 0; i < ctx->nb_streams; i++) {
               AVCodec *pCodec = NULL;
               pCodec = avcodec_find_decoder(ctx->streams[i]->codecpar->codec_id);
@@ -95,6 +100,8 @@ int main(int argc, char* argv[]) {
                         vCodecContext = pCodecContext;
                         video_stream_index = i;
                         swsContext = sws_getContext(vCodecContext->width, vCodecContext->height, vCodecContext->pix_fmt, vCodecContext->width, vCodecContext->height, AV_PIX_FMT_BGR24, SWS_BICUBIC, NULL, NULL, NULL);
+                        mat = cv::Mat(vCodecContext->height, vCodecContext->width, CV_8UC3);
+                        dstMat = cv::Mat(vCodecContext->height, vCodecContext->width, CV_8UC3);
                       }
                       if (pCodec->type == AVMEDIA_TYPE_AUDIO) {
                         aCodecContext = pCodecContext;
@@ -105,7 +112,6 @@ int main(int argc, char* argv[]) {
                 }
               }
             }
-            std::cout << "Processing packets" << std::endl;
             AVPacket *pPacket = av_packet_alloc();
             if (!pPacket) {
               std::cerr << "Failed to allocated memory for AVPacket" << std::endl;
@@ -116,15 +122,10 @@ int main(int argc, char* argv[]) {
               std::cerr << "Failed to allocated memory for AVFrame" << std::endl;
               return EXIT_FAILURE;
             }
-            AVFrame *pRGBFrame = av_frame_alloc();
-            if (!pRGBFrame) {
-              std::cerr << "Failed to allocated memory for AVFrame" << std::endl;
-              return EXIT_FAILURE;
-            }
             while (av_read_frame(ctx, pPacket) >= 0) {
               if (pPacket->stream_index == video_stream_index) {
 //                std::cout << "Processing video packet" << std::endl;
-                decode_packet(swsContext, pPacket, vCodecContext, pFrame, pRGBFrame);
+                decode_packet(swsContext, pPacket, vCodecContext, pFrame, mat, dstMat);
                 av_packet_unref(pPacket);
               } else if (pPacket->stream_index == audio_stream_index) {
 //                std::cout << "Processing audio packet" << std::endl;
