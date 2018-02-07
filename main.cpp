@@ -9,7 +9,7 @@ extern "C" {
 }
 #endif
 
-int decode_packet(SwsContext *swsContext, AVPacket *pPacket, AVCodecContext *pCodecContext, AVFrame *pFrame, cv::Mat &mat, cv::Mat &processedMat) {
+int decode_video_packet(SwsContext *swsContext, AVPacket *pPacket, AVCodecContext *pCodecContext, AVFrame *pFrame, cv::Mat &mat, cv::Mat &processedMat) {
   int response = avcodec_send_packet(pCodecContext, pPacket);
   if (response < 0) {
     std::cerr << "Error while sending a packet to the decoder" << std::endl;
@@ -125,7 +125,7 @@ int main(int argc, char* argv[]) {
             while (av_read_frame(ctx, pPacket) >= 0) {
               if (pPacket->stream_index == video_stream_index) {
 //                std::cout << "Processing video packet" << std::endl;
-                decode_packet(swsContext, pPacket, vCodecContext, pFrame, mat, dstMat);
+                decode_video_packet(swsContext, pPacket, vCodecContext, pFrame, mat, dstMat);
                 av_packet_unref(pPacket);
               } else if (pPacket->stream_index == audio_stream_index) {
 //                std::cout << "Processing audio packet" << std::endl;
