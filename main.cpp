@@ -65,9 +65,10 @@ int main(int argc, char* argv[])
               if (pCodec == NULL) {
                 std::cerr << "ERROR unsupported codec for stream " << ctx->streams[i]->id << std::endl;
               } else {
-                std::cout << "Codec for stream " << ctx->streams[i]->id << " is " << pCodec->id << std::endl;
+                std::cout << "Codec for stream " << ctx->streams[i]->id << " is " << pCodec->long_name << " type " << pCodec->type << std::endl;
               }
             }
+//            AVCodecContext *pCodecContext = avcodec_alloc_context3(pCodec);
           }
         }
       }
